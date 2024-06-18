@@ -25,7 +25,7 @@ module.exports = (function () {
     // Lấy danh sách order
     async function get_list_order() {
         try {
-            const response = await axios.get('https://www.demo.themimi.net/wp-json/myplugin/v1/orders', {
+            const response = await axios.get('http://demo.themimi.net/wp-json/myplugin/v1/orders', {
                 params: { fields: "id, date, total, customer_name, status" }
             });
             return response.data;
@@ -36,9 +36,7 @@ module.exports = (function () {
     }
 	router.get('/get_list_order', async(req,res)=>{
 		try {
-            const response = await axios.get('https://www.demo.themimi.net/wp-json/myplugin/v1/orders', {
-                params: { fields: "id, date, total, customer_name, status" }
-            });
+            const response = await get_list_order();
             res.send(response.data);
         } catch (err) {
             console.error("Error getting list orders: ", err);
@@ -47,9 +45,8 @@ module.exports = (function () {
 	})
 
     // Tạo bản ghi mới
-    async function create_record(fields) {
+    async function create_record(fields, access_token) {
         try {
-            const access_token = await get_access_token();
             const response = await axios.post(
                 "https://open.larksuite.com/open-apis/bitable/v1/apps/VY5Db3XasahyrLsbB1oljHYAg1e/tables/tblbin4RuHqK3lvH/records",
                 { fields: fields },
@@ -81,69 +78,74 @@ module.exports = (function () {
 		return formattedDate;
     }
 
-    router.get('/list_order', async (req, res) => {
+    router.post('/list_order', async (req, res) => {
         try {
             const list_order = await get_list_order();
             const access_token = await get_access_token();
-
-            const createRecordPromises = [];
-
-			for (const order of list_order) {
-				const fields = {
-					"id": String(order.id),
-					"name": String(order.customer_name),
-					"total": String(order.total),
-					"status": String(order.status),
-				};
-				console.log("Data to be sent to Lark Suite:", fields);
-				create_record(fields, access_token)
-				// Accumulate the promise
-				createRecordPromises.push(create_record(fields, access_token));
-			}
-
-			// Wait for all create_record promises to resolve
-			// await Promise.all(createRecordPromises);
+    
+            for (const order of list_order) {
+                // const date = formatDate(order.date);
+    
+                const fields = {
+                    "id": String(order.id),
+                    "name": String(order.customer_name),
+                    "total": String(order.total),
+                    "status": String(order.status),
+                    // "date": date,
+                };
+    
+                console.log("Data to be sent to Lark Suite:", fields);
+    
+                await create_record(fields, access_token);
+            }
             res.send("DONE!");
         } catch (err) {
             console.error("Error:", err);
             res.status(500).send("Error: " + err.message);
         }
-    });
+    });  
+      // Route để nhận webhook từ Lark
+      router.put('/webhook', async (req, res) => {
+        try {
+          const { id, status } = req.body;
+          console.log(`Received webhook with order ID: ${id} and status: ${status}`);
+          await updateOrderStatus(id, status); // Gọi hàm updateOrderStatus với status được gửi dưới dạng object
+          res.status(200).send('Webhook received');
+        } catch (err) {
+          console.error("Error handling Lark webhook:", err);
+          res.status(500).send("Error: " + err.message);
+        }
+      });
+      
+      const consumerKey =  'ck_87fc1b79f909d4caa5cfaee29540d3c14fc054a4'
+      const consumerSecret = 'cs_a80709ba8b1f53d32db0806c063507cd6408c869'
+      function createBasicAuthHeader(username, password) {
+        const token = Buffer.from(`${username}:${password}`).toString('base64');
+        return `Basic ${token}`;
+      }
+	  // Cập nhật trạng thái đơn hàng trong WooCommerce
+	  async function updateOrderStatus(orderId, status) {
+		try {
+            console.log(1);
+            console.log("Bắt đầu cập nhật trạng thái đơn hàng", orderId);
+            const authHeader = createBasicAuthHeader(consumerKey, consumerSecret);
 
-	
-	// router.put('/webhook', async (req, res) => {
-	// 	try {
-	// 	  const { id, status } = req.body;
-	// 	  console.log(id +" " + status);
-	// 	  await updateOrderStatus(id, status);
-	// 	  res.status(200).send('Webhook received');
-	// 	} catch (err) {
-	// 	  console.error("Error handling Lark webhook:", err);
-	// 	  res.status(500).send("Error: " + err.message);
-	// 	}
-	//   });
-	  
-	//   // Cập nhật trạng thái đơn hàng trong WooCommerce
-	//   async function updateOrderStatus(orderId, status) {
-	// 	try {
-	// 	  const response = await axios.put(
-	// 		`https://www.demo.themimi.net/wp-json/myplugin/v1/orders/${orderId}`,
-	// 		{ status: status },
-	// 		{
-	// 			auth: {
-    //                 username: 'ck_e6bcf99857cac30be9e72fd7dc1f3e23b4bb67f2',
-    //                 password: 'cs_1828b12751eb2e4a46a7770b944353df7761265f'
-    //             },
-	// 		  headers: {
-	// 			'Content-Type': 'application/json'
-	// 		  }
-	// 		}
-	// 	  );
-	// 	  console.log(response.data);
-	// 	  console.log(`Order ${orderId} status updated to ${status} in WooCommerce`);
-	// 	} catch (err) {
-	// 	  console.error("Error updating order status in WooCommerce:", err.response ? err.response.data : err.message);
-	// 	}
-	//   }
+            const response = await axios.put(
+                `http://demo.themimi.net/wp-json/myplugin/v1/orders/${orderId}`,
+                { status: status },
+                {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': authHeader
+                    }
+                }
+             );
+            console.log(2);
+            console.log(response.data);
+            console.log(`Order ${orderId} status updated to ${status} in WooCommerce`);
+		} catch (err) {
+		  console.error("Error updating order status in WooCommerce:", err.response ? err.response.data : err.message);
+		}
+	  }
     return router; 
 })();
